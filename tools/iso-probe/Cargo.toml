@@ -1,0 +1,18 @@
+[package]
+name = "iso-probe"
+description = "Command-line harness for usbfs isochronous streams: enumerate, dump descriptors, run the claim spike, sweep latency, and play a tone."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+usbfs-iso.workspace = true
+uac-host = { workspace = true, features = ["uac2"] }
+libc.workspace = true
+
+[lints]
+workspace = true

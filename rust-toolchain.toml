@@ -1,0 +1,16 @@
+# Pin an exact version rather than the floating `stable` channel: rustfmt's rules shift between
+# releases, and a floating channel makes `cargo fmt --check` fail on files nobody touched. An exact
+# pin makes rustc/rustfmt/clippy identical for every contributor and for CI, so formatting only
+# ever changes in a deliberate bump-and-reformat commit.
+#
+# NOTE: this is a *toolchain* pin, not the MSRV. The MSRV is `rust-version` in Cargo.toml (1.77)
+# and CI verifies it separately.
+[toolchain]
+channel = "1.96.0"
+components = ["rustfmt", "clippy"]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-linux-android",
+    "armv7-linux-androideabi",
+    "x86_64-linux-android",
+]

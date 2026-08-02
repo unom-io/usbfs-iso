@@ -1,0 +1,40 @@
+[workspace]
+resolver = "2"
+members = ["crates/usbfs-iso", "crates/uac-host", "tools/iso-probe"]
+# The Android reference app's cdylib is built by cargo-ndk from its own directory with its own
+# target dir; keeping it out of the workspace means `cargo test --workspace` on a developer's
+# desktop never tries to link a JNI library against a host toolchain.
+exclude = ["examples/android-tone/rust"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+# Bumping this is a breaking change for downstreams; keep it conservative. 1.77 is what
+# `CStr::from_bytes_until_nul`-free code plus `OwnedFd`/`BorrowedFd` (1.63) actually need, with
+# headroom for `c"…"` literals (1.77).
+rust-version = "1.77"
+license = "MIT OR Apache-2.0"
+authors = ["unom <hi@unom.io>"]
+repository = "https://github.com/unom/usb-iso"
+keywords = ["usb", "isochronous", "usbfs", "android", "audio"]
+categories = ["hardware-support", "os::linux-apis", "multimedia::audio"]
+
+[workspace.dependencies]
+usbfs-iso = { version = "0.1.0", path = "crates/usbfs-iso" }
+uac-host = { version = "0.1.0", path = "crates/uac-host" }
+libc = "0.2"
+
+# `unsafe fn` marks a CONTRACT the caller upholds; it is not a licence for the whole body to skip
+# checking. Every unsafe operation gets its own block and its own SAFETY comment — in a crate whose
+# entire job is passing pointers across the kernel boundary, that is the only reviewable posture.
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "deny"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1

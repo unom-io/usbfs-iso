@@ -1,0 +1,25 @@
+[package]
+name = "usbfs-iso"
+description = "Isochronous USB transfers on Linux and Android through raw usbfs, from an unprivileged process. No libusb, no root."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "README.md"
+
+[dependencies]
+# The only dependency, and only for `ioctl`/`errno`/`c_int`. Deliberate: a crate that others adopt
+# for a hole in the ecosystem must not drag a dependency tree in with it.
+libc.workspace = true
+
+[lints]
+workspace = true
+
+[package.metadata.docs.rs]
+# The interesting half of this crate is `cfg(any(target_os = "linux", target_os = "android"))`.
+default-target = "x86_64-unknown-linux-gnu"
+targets = ["x86_64-unknown-linux-gnu", "aarch64-linux-android"]

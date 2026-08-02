@@ -1,0 +1,9 @@
+/target
+**/*.rs.bk
+.DS_Store
+# Android reference app
+examples/android-tone/.gradle/
+examples/android-tone/build/
+examples/android-tone/app/build/
+examples/android-tone/local.properties
+examples/android-tone/rust/target/
