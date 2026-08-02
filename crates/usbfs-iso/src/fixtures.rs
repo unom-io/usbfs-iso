@@ -17,6 +17,9 @@
 //! | if1 alt0 | class 1 / subclass 2, no endpoints | same |
 //! | if1 alt1 endpoint 0x01 | isochronous OUT, 392 B, `bInterval` 4 | same |
 //! | if2 alt1 endpoint 0x82 | isochronous IN, **196 B**, `bInterval` 4 | same (was 100 — corrected) |
+//! | if2 alt1 stream | **2 channels**, 16-bit, 48 kHz | same (was 1 channel — corrected) |
+//! | if1 alt1 stream | 4 channels, 16-bit, 48 kHz, **adaptive** | same |
+//! | bus speed | — | **high**, so `bInterval` 4 is 1 ms per packet |
 //! | if3 endpoints 0x84 / 0x03 | interrupt, 64 B, `bInterval` 6 | same |
 //! | VID:PID | `054c:0ce6` | same |
 //!
@@ -67,8 +70,9 @@ pub static DUALSENSE_DESCRIPTORS: &[u8] = &[
     //      CS_INTERFACE / INPUT_TERMINAL - the microphone (12)
     0x0c, 0x24, 0x02, 0x01, // bTerminalID 1
     0x01, 0x02, // wTerminalType 0x0201 = microphone
-    0x00, 0x01, // bAssocTerminal, bNrChannels = 1
-    0x00, 0x00, 0x00, 0x00, // wChannelConfig, iChannelNames, iTerminal
+    0x00, 0x02, // bAssocTerminal, bNrChannels = 2
+    0x03, 0x00, // wChannelConfig = FL | FR
+    0x00, 0x00, // iChannelNames, iTerminal
     //      CS_INTERFACE / OUTPUT_TERMINAL - mic to USB (9)
     0x09, 0x24, 0x03, 0x02, // bTerminalID 2
     0x01, 0x01, // wTerminalType 0x0101 = USB streaming
@@ -117,8 +121,8 @@ pub static DUALSENSE_DESCRIPTORS: &[u8] = &[
     0x09, 0x04, 0x02, 0x01, 0x01, 0x01, 0x02, 0x00, 0x00,
     //      CS_INTERFACE / AS_GENERAL (7)
     0x07, 0x24, 0x01, 0x02, 0x01, 0x01, 0x00,
-    //      CS_INTERFACE / FORMAT_TYPE_I - 1 channel 16-bit 48 kHz (11)
-    0x0b, 0x24, 0x02, 0x01, 0x01, 0x02, 0x10, 0x01, 0x80, 0xbb, 0x00,
+    //      CS_INTERFACE / FORMAT_TYPE_I - 2 channels 16-bit 48 kHz (11)
+    0x0b, 0x24, 0x02, 0x01, 0x02, 0x02, 0x10, 0x01, 0x80, 0xbb, 0x00,
     //      Endpoint 0x82: isochronous, asynchronous, 196 bytes (9)
     0x09, 0x05, 0x82, 0x05, 0xc4, 0x00, 0x04, 0x00, 0x00,
     //      CS_ENDPOINT / EP_GENERAL (7)

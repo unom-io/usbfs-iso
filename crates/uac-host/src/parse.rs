@@ -609,7 +609,7 @@ mod tests {
         let ins: Vec<_> = f.input_streams().collect();
         assert_eq!(ins.len(), 1);
         assert_eq!(ins[0].interface(), 2);
-        assert_eq!(ins[0].channels(), 1);
+        assert_eq!(ins[0].channels(), 2);
         assert_eq!(ins[0].direction(), Direction::In);
         // And it must not appear in the playback list.
         assert!(f.output_streams().all(|s| s.interface() != 2));

@@ -114,20 +114,37 @@ feature sets, and docs — in one command.
 
 ## Status
 
-Implemented and green: the transport, the class layer, the harnesses, and the Android reference app
-(it builds and packages all three ABIs).
+### Verified on hardware
 
-**Not yet verified on hardware**, because that needs a device on a bus:
+**The approach works.** Measured 2026-08-02 on a **Nothing Phone (3)** (Snapdragon 8s Gen 4,
+Android 16 / SDK 36) with a **DualSense** on USB-C, from an ordinary unprivileged app:
 
-- The **claim spike** (`iso-probe spike`, or the app's *Spike* button). It answers whether a given
-  kernel will hand over an audio interface at all — some OEM Android kernels refuse, and there is no
-  app-side fix.
-- The **latency floor** (`iso-probe sweep`). Nobody has published what the achievable in-flight
-  depth is on Android. If it lands above ~15 ms the route serves music and video output well and
-  haptics poorly — which is a real answer, and the harness prints it as one.
+- **The force-claim succeeds.** Interface 1 was taken from `snd-usb-audio` and handed back.
+- **Isochronous OUT works.** One URB, 392 of 392 bytes, zero short packets, zero packet errors,
+  zero URB errors — repeatable without replugging.
+- **The gamepad is unaffected.** The pad stayed enumerated as an input device with its motion
+  sensors and touchpad, because the detach is per-interface and HID sits on interface 3.
+- **The microphone survives.** This was the feared trade-off, and it did not happen:
+  `snd-usb-audio` stays bound to interfaces 0 and 2, so the ALSA card and the pad's capture device
+  remain registered with the framework. Haptics do not have to cost the pad mic.
+- **The bus is high-speed**, which settles the packet arithmetic: `bInterval` 4 means 1 ms per
+  packet, so 384 bytes of 4-channel 16-bit 48 kHz audio fit with exactly one sample frame of slack.
+- usbfs reports `REAP_AFTER_DISCONNECT` **and** `MMAP`, so the disconnect-stranding hazard is
+  mitigated on this kernel and a future zero-copy path is available.
+
+One caveat worth knowing: after release, `USBDEVFS_CONNECT` succeeds but `snd-usb-audio` does not
+re-probe interface 1 on its own, so the playback interface stays driver-less until the device is
+replugged. Harmless here — the card lives on the other interfaces, and Android denylists that
+playback path anyway — but it is not a clean round trip.
+
+### Still open
+
+- The **latency floor** (`iso-probe sweep`, or the app's *Sweep* button). Nobody has published what
+  the achievable in-flight depth is on Android. If it lands above ~15 ms the route serves music and
+  video output well and haptics poorly — a real answer, and the harness prints it as one.
 - The **tier-1 rig**, which needs a kernel with the gadget stack — no hosted runner has one (above).
-- The DualSense descriptor fixture is **synthesised** from measured values, not a byte-exact
-  capture. `iso-probe dump` emits a replacement in the right form.
+- The DualSense fixture is **synthesised**, though every externally-observable value in it has now
+  been checked against the real pad. `iso-probe dump` emits a byte-exact replacement.
 
 ## Licence
 

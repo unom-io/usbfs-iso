@@ -50,6 +50,9 @@ class MainActivity : Activity() {
 
     private var device: UsbDevice? = null
 
+    /** Action named by `--es run <probe|spike|tone|sweep>`, fired once permission is granted. */
+    private var pendingAction: String? = null
+
     private val permissionReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action != ACTION_USB_PERMISSION) return
@@ -77,7 +80,11 @@ class MainActivity : Activity() {
         }
         output = TextView(this).apply {
             textSize = 12f
-            setTextIsSelectable(true)
+            // Deliberately NOT focusable. A selectable TextView joins the focus order, and on a
+            // phone driven by a D-pad (or by `adb shell input keyevent`, which is how this gets
+            // automated) it swallows the presses meant for the buttons.
+            setTextIsSelectable(false)
+            isFocusable = false
         }
         root.addView(buttons)
         root.addView(
@@ -100,6 +107,7 @@ class MainActivity : Activity() {
             registerReceiver(permissionReceiver, filter)
         }
 
+        pendingAction = intent?.getStringExtra("run")
         log("usb-iso reference app. Detail goes to logcat: adb logcat -s usb-iso")
         refresh()
     }
@@ -112,6 +120,7 @@ class MainActivity : Activity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        pendingAction = intent.getStringExtra("run")
         // An attach intent carries a persistent permission grant for that device.
         refresh()
     }
@@ -143,8 +152,13 @@ class MainActivity : Activity() {
         }
 
         if (!usbManager.hasPermission(dev)) {
-            log("no permission yet")
+            log("no permission yet — asking")
             addButton("Request permission") { requestPermission(dev) }
+            buttons.getChildAt(0)?.requestFocus()
+            // Ask immediately rather than making the first thing a user sees a button that only
+            // opens another prompt. The system dialog is unavoidable — it is a security decision,
+            // not a step an app gets to skip.
+            requestPermission(dev)
             return
         }
 
@@ -160,6 +174,20 @@ class MainActivity : Activity() {
         }
         addButton("Sweep (WP7: find the latency floor)") {
             run("sweep") { fd -> Native.sweep(fd, -1, -1, 3) }
+        }
+        buttons.getChildAt(0)?.requestFocus()
+
+        // `--es run spike` on the launch intent fires an action as soon as permission is in hand,
+        // so an on-glass run is one adb command plus the system's own permission prompt.
+        pendingAction?.let { action ->
+            pendingAction = null
+            when (action) {
+                "spike" -> run("spike") { fd -> Native.spike(fd, -1, -1) }
+                "probe" -> run("probe") { fd -> Native.probe(fd) }
+                "tone" -> run("tone") { fd -> Native.tone(fd, -1, -1, 3, 200, 8, 0) }
+                "sweep" -> run("sweep") { fd -> Native.sweep(fd, -1, -1, 3) }
+                else -> log("unknown --es run \"$action\"")
+            }
         }
     }
 
