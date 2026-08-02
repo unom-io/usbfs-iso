@@ -106,6 +106,7 @@ pub struct AudioStream {
     pub(crate) terminal_link: u8,
     pub(crate) control_interface: u8,
     pub(crate) version: UacVersion,
+    pub(crate) sampling_freq_control: bool,
 }
 
 impl AudioStream {
@@ -175,6 +176,30 @@ impl AudioStream {
     /// Which class revision this stream was described with.
     pub fn version(&self) -> UacVersion {
         self.version
+    }
+
+    /// Whether the endpoint implements the UAC1 sampling-frequency control.
+    ///
+    /// It is optional. A single-rate device commonly does **not** implement it and answers a
+    /// `SET_CUR` with a STALL — which is a legal "I have nothing to set", not a failure. Sending
+    /// the request anyway and treating the stall as fatal is a good way to make a working device
+    /// look broken.
+    pub fn supports_sampling_freq_control(&self) -> bool {
+        self.sampling_freq_control
+    }
+
+    /// The single rate this stream can do, if it advertises exactly one.
+    ///
+    /// Only the stream-opening path consults this, and that is Linux-only.
+    ///
+    /// When the rate a caller wants is the only rate on offer, there is nothing to negotiate and a
+    /// refused control request changes nothing.
+    #[cfg_attr(not(any(target_os = "linux", target_os = "android")), allow(dead_code))]
+    pub(crate) fn only_rate(&self) -> Option<u32> {
+        match &self.rates {
+            Rates::Discrete(list) if list.len() == 1 => Some(list[0]),
+            _ => None,
+        }
     }
 
     /// Bytes on the wire for one sample frame across all channels.
@@ -276,7 +301,11 @@ pub fn parse_all(blob: &[u8]) -> Result<Vec<AudioFunction>> {
                     }
                 }
             }
-            CS_ENDPOINT => { /* EP_GENERAL: only carries controls we do not use yet. */ }
+            CS_ENDPOINT => {
+                if let Some(s) = pending_stream.as_mut() {
+                    s.class_endpoint(d.bytes);
+                }
+            }
             _ => {}
         }
     }
@@ -406,6 +435,8 @@ struct PendingStream {
     feedback_endpoint: Option<u8>,
     /// UAC1's 9-byte endpoint descriptor names its feedback endpoint in `bSynchAddress`.
     synch_address: Option<u8>,
+    /// CS_ENDPOINT `bmAttributes` bit 0: does the device implement the sampling-frequency control?
+    sampling_freq_control: bool,
 }
 
 impl PendingStream {
@@ -422,7 +453,20 @@ impl PendingStream {
             data_endpoint: None,
             feedback_endpoint: None,
             synch_address: None,
+            sampling_freq_control: false,
         }
+    }
+
+    /// UAC1 §4.6.1.2 / UAC2 §4.10.1.2: the class-specific AS endpoint descriptor. Bit 0 of
+    /// `bmAttributes` is the only thing here this crate needs — whether the endpoint implements
+    /// the sampling-frequency control. It is **optional**, and a device that does not implement it
+    /// answers a `SET_CUR` with a STALL, which is legal rather than a fault.
+    fn class_endpoint(&mut self, bytes: &[u8]) {
+        // bLength, CS_ENDPOINT, bDescriptorSubtype (EP_GENERAL = 1), bmAttributes
+        if bytes.len() < 4 || bytes[2] != 1 {
+            return;
+        }
+        self.sampling_freq_control = bytes[3] & 0x01 != 0;
     }
 
     fn class_descriptor(&mut self, bytes: &[u8]) {
@@ -543,6 +587,7 @@ impl PendingStream {
             terminal_link,
             control_interface: self.control_interface,
             version: self.version,
+            sampling_freq_control: self.sampling_freq_control,
         })
     }
 }
@@ -643,6 +688,17 @@ mod tests {
             !s.rates().contains(48_000),
             "an unresolved clock must not claim support"
         );
+    }
+
+    #[test]
+    fn the_optional_sampling_frequency_control_bit_is_read_from_the_class_endpoint() {
+        let f = parse(fixtures::DUALSENSE_DESCRIPTORS).unwrap();
+        let out = f.output_streams().next().unwrap();
+        // The fixture's CS_ENDPOINT sets bmAttributes bit 0, so the control is claimed.
+        assert!(out.supports_sampling_freq_control());
+        // And it advertises exactly one rate, so there is nothing to negotiate even if the device
+        // refuses the request — which a real DualSense does.
+        assert_eq!(out.only_rate(), Some(48_000));
     }
 
     #[cfg(feature = "uac2")]

@@ -128,6 +128,15 @@ impl Error {
         }
     }
 
+    /// True when the device answered a control request with a STALL.
+    ///
+    /// usbfs surfaces a stalled control transfer as `EPIPE`. A stall is the device's legal way of
+    /// saying "I do not implement this request" — for optional class controls it is an answer, not
+    /// a fault, and callers routinely need to tell it apart from a real I/O failure.
+    pub fn is_stall(&self) -> bool {
+        matches!(self, Error::Io(e) if e.raw_os_error() == Some(libc::EPIPE))
+    }
+
     /// True when the device is gone and the only recovery is a full re-open.
     ///
     /// Consumers use this to distinguish "re-arm the stream" from "tear the whole session down".
@@ -250,6 +259,15 @@ mod tests {
             }
             other => panic!("expected InterfaceBusy, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_stalled_control_request_is_recognisable() {
+        // Optional class controls answer with a STALL, and a caller must be able to tell that
+        // apart from a real failure without string-matching an io::Error.
+        assert!(Error::from_errno(libc::EPIPE, ErrnoContext::Other).is_stall());
+        assert!(!Error::from_errno(libc::EIO, ErrnoContext::Other).is_stall());
+        assert!(!Error::Disconnected.is_stall());
     }
 
     #[test]

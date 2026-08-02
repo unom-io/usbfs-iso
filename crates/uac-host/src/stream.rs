@@ -215,7 +215,22 @@ impl AudioStream {
         Ok(playback)
     }
 
+    /// Set the sample rate, tolerating the two legal ways a device can decline.
+    ///
+    /// Measured on a real DualSense: it answers `SET_CUR SAMPLING_FREQ_CONTROL` with a STALL
+    /// (`EPIPE`). That is not a fault. The control is **optional** in UAC1 §5.2.3.2.3.1, the pad
+    /// runs at one fixed rate, and there is nothing for the request to change. Treating the stall
+    /// as fatal made every stream fail to open on a device whose audio endpoint works perfectly.
+    ///
+    /// So: skip the request when the endpoint does not claim the control, and when it does claim
+    /// it but stalls anyway, accept that only if the rate asked for is the single rate the stream
+    /// advertises. A stall while genuinely trying to *change* rate is still an error.
     fn write_sample_rate(&self, device: &UsbFsDevice, rate: u32) -> Result<()> {
+        if self.version == UacVersion::Uac1 && !self.sampling_freq_control {
+            // Nothing to set: the endpoint does not implement the control, so its rate is fixed.
+            return Ok(());
+        }
+
         let result = match self.version {
             // UAC1 §5.2.3.2.3.1: the control lives on the *endpoint*, and the value is 24-bit.
             UacVersion::Uac1 => {
@@ -253,6 +268,9 @@ impl AudioStream {
         };
         match result {
             Ok(_) => Ok(()),
+            // A STALL is the device saying "I do not implement this". Harmless when the rate we
+            // asked for is the only one it offers.
+            Err(source) if source.is_stall() && self.only_rate() == Some(rate) => Ok(()),
             Err(source) => Err(Error::RateRejected {
                 requested: rate,
                 source,

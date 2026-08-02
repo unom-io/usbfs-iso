@@ -137,14 +137,41 @@ re-probe interface 1 on its own, so the playback interface stays driver-less unt
 replugged. Harmless here — the card lives on the other interfaces, and Android denylists that
 playback path anyway — but it is not a clean round trip.
 
+### The latency floor, measured
+
+Nobody had published what an isochronous OUT stream can actually achieve on Android. On the same
+phone and pad, sweeping in-flight depth against packets-per-URB, two independent runs of 36 cells
+each (3 s per cell, `ANDROID_PRIORITY_AUDIO` applied and confirmed):
+
+| in-flight depth | run 1 | run 2 |
+|---|---|---|
+| 2 ms — 2 URBs x 1 packet | 11 underruns | 5 underruns, 1 dropped packet |
+| 3 ms — 3 URBs x 1 packet | 1 underrun | clean |
+| **4 ms — 4 URBs x 1 packet** | **clean** | **clean** |
+| 6 ms and deeper | clean | clean |
+
+**4 ms is the dependable floor**; 3 ms is marginal — clean in one run, one underrun in the other —
+and 2 ms never survives. That is comfortably inside single-digit milliseconds, so this route is
+usable for **haptics**, not only for music. For reference, the C prior art this design took its
+cues from runs 80 URBs deep (~80 ms) because that is what music playback needed.
+
+One packet per URB is what buys the low floor: packing more multiplies the latency of a single
+completion, so `2 URBs x 4 packets` is 8 ms of audio in flight, not 2 ms. Depth is the knob;
+packets-per-URB trades latency for fewer completions to service.
+
+Caveat worth stating: run 1 showed isolated dropped packets at three mid-range depths that were
+clean in run 2 and clean at neighbouring depths in both. That reads as occasional transient loss
+(roughly 1 packet in 3000) rather than anything depth-dependent, but it means "clean" here is
+"clean over 3 seconds", not a guarantee. A shipping consumer should watch `IsoStats::short_bytes`
+rather than assume.
+
 ### Still open
 
-- The **latency floor** (`iso-probe sweep`, or the app's *Sweep* button). Nobody has published what
-  the achievable in-flight depth is on Android. If it lands above ~15 ms the route serves music and
-  video output well and haptics poorly — a real answer, and the harness prints it as one.
 - The **tier-1 rig**, which needs a kernel with the gadget stack — no hosted runner has one (above).
 - The DualSense fixture is **synthesised**, though every externally-observable value in it has now
   been checked against the real pad. `iso-probe dump` emits a byte-exact replacement.
+- The **desktop** path (`iso-probe`) is unexercised on hardware; everything measured so far came
+  through the Android app.
 
 ## Licence
 
