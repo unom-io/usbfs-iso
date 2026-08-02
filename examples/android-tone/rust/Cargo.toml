@@ -1,0 +1,25 @@
+[package]
+name = "usb-iso-tone"
+description = "JNI shim for the android-tone reference app: wraps a UsbDeviceConnection file descriptor and drives an isochronous USB audio stream."
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# Path dependencies, not versions: this example is meant to be edited alongside the crates.
+usbfs-iso = { path = "../../../crates/usbfs-iso" }
+uac-host = { path = "../../../crates/uac-host", features = ["uac2"] }
+libc = "0.2"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+# A panic across the JNI boundary is undefined behaviour. Every entry point catches its own
+# unwind, and this keeps the unwinder present so that catch actually works.
+panic = "unwind"

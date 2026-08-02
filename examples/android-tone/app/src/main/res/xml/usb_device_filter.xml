@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Any device with a USB Audio Class interface. Class 1 is audio; subclass and protocol are left
+     open so both UAC1 and UAC2 devices match, and so a composite device (a game controller with an
+     audio function, for instance) matches on its audio interface. -->
+<resources>
+    <usb-device class="1" />
+</resources>
