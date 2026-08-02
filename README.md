@@ -102,11 +102,16 @@ length plan.
   any host including macOS: `cargo test --workspace`.
 - **Tier 1 — a real virtual USB device.** `ci/gadget-rig.sh` binds the kernel's `f_uac1` gadget to a
   `dummy_hcd` virtual UDC, and the host side of the same machine enumerates a genuine USB Audio
-  device the crates drive end to end. **Hosted CI runners cannot do this**: measured on
-  `ubuntu-latest` (kernel 6.17.0-1020-azure), `CONFIG_USB_GADGET` is not set at all — the whole
-  gadget stack is absent from the cloud image, so no amount of privilege helps. Green tier-1 needs a
-  purpose-built VM or a self-hosted machine. Run `./ci/gadget-rig.sh check` on any candidate first;
-  it needs no root and changes nothing.
+  device the crates drive end to end. Two kernels measured, and the gap is narrower than it looks:
+  - `ubuntu-latest` CI runner (6.17.0-1020-azure): `CONFIG_USB_GADGET` **not set at all**. The whole
+    gadget stack is absent from the cloud image, so no amount of privilege helps.
+  - A stock Ubuntu desktop kernel (7.0.0-28-generic): `CONFIG_USB_GADGET=m`,
+    `CONFIG_USB_CONFIGFS_F_UAC1=y`, with `usb_f_uac1` and `libcomposite` both present — **only
+    `CONFIG_USB_DUMMY_HCD` is missing.**
+
+  So on an ordinary distro kernel the shortfall is one config option, not a whole subsystem: build
+  `dummy_hcd` out of tree against the running kernel headers, or use a machine with a real UDC.
+  `./ci/gadget-rig.sh check` reports exactly which pieces a candidate is missing, without root.
 - **Tier 2 — hardware, manual.** `iso-probe spike` and `iso-probe sweep` on a real device.
 
 `./scripts/check.sh` runs everything CI runs — fmt, tests, clippy across all four targets and both
@@ -143,15 +148,21 @@ Nobody had published what an isochronous OUT stream can actually achieve on Andr
 phone and pad, sweeping in-flight depth against packets-per-URB, two independent runs of 36 cells
 each (3 s per cell, `ANDROID_PRIORITY_AUDIO` applied and confirmed):
 
-| in-flight depth | run 1 | run 2 |
-|---|---|---|
-| 2 ms — 2 URBs x 1 packet | 11 underruns | 5 underruns, 1 dropped packet |
-| 3 ms — 3 URBs x 1 packet | 1 underrun | clean |
-| **4 ms — 4 URBs x 1 packet** | **clean** | **clean** |
-| 6 ms and deeper | clean | clean |
+| in-flight depth | idle 1 | idle 2 | under load |
+|---|---|---|---|
+| 2 ms — 2 URBs x 1 packet | 11 underruns | 5 underruns, 1 dropped packet | 5 underruns |
+| 3 ms — 3 URBs x 1 packet | 1 underrun | clean | clean |
+| **4 ms — 4 URBs x 1 packet** | **clean** | **clean** | **clean** |
+| 6 ms — 6 URBs x 1 packet | clean | clean | 1 underrun |
+| 8 ms and deeper | clean | clean | clean |
 
-**4 ms is the dependable floor**; 3 ms is marginal — clean in one run, one underrun in the other —
-and 2 ms never survives. That is comfortably inside single-digit milliseconds, so this route is
+"Under load" is eight spinning threads on an 8-core phone with CPU0 at 105 °C reporting severe
+thermal throttling — harsher than game streaming, and covering both load conditions at once.
+
+**4 ms is the dependable floor: clean in all three runs, including the loaded one.** 3 ms is
+marginal, and 2 ms never survives. That the number barely moves under saturation is the useful part
+— the producer thread runs at `ANDROID_PRIORITY_AUDIO` (-16), which the sweep confirms actually
+takes effect, and that is evidently enough to keep it scheduled against eight busy cores. That is comfortably inside single-digit milliseconds, so this route is
 usable for **haptics**, not only for music. For reference, the C prior art this design took its
 cues from runs 80 URBs deep (~80 ms) because that is what music playback needed.
 
@@ -159,11 +170,12 @@ One packet per URB is what buys the low floor: packing more multiplies the laten
 completion, so `2 URBs x 4 packets` is 8 ms of audio in flight, not 2 ms. Depth is the knob;
 packets-per-URB trades latency for fewer completions to service.
 
-Caveat worth stating: run 1 showed isolated dropped packets at three mid-range depths that were
-clean in run 2 and clean at neighbouring depths in both. That reads as occasional transient loss
-(roughly 1 packet in 3000) rather than anything depth-dependent, but it means "clean" here is
-"clean over 3 seconds", not a guarantee. A shipping consumer should watch `IsoStats::short_bytes`
-rather than assume.
+Caveat worth stating, and it is the real one: across the three runs, isolated single-event blips
+turn up at depths whose neighbours are clean — dropped packets at three mid-range depths in run 1,
+a lone underrun at 6 ms under load. They are **not depth-dependent**; they look like roughly one
+transient event per 3-second run wherever it lands. So "clean" here means "clean over 3 seconds",
+not a guarantee, and a shipping consumer should watch `IsoStats::short_bytes` and
+`IsoStats::underruns` rather than assume a depth is safe because a sweep said so once.
 
 ### Still open
 
