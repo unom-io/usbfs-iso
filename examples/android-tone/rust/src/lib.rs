@@ -423,6 +423,22 @@ pub unsafe extern "system" fn Java_io_unom_usbiso_tone_Native_tone(
             None => 48_000,
         };
 
+        // Audio priority, as a real consumer should take. Android does not hand SCHED_FIFO to
+        // ordinary app threads, so -16 (ANDROID_PRIORITY_AUDIO) is the knob that exists.
+        //
+        // Measured, and NOT the fix it looks like: at 8 ms depth this generator underran 247 times
+        // in 3 s without priority and 246 times with it (short bytes did drop to zero). So the
+        // shortfall here is not scheduling — a generator that emits exactly one packet per call
+        // and returns keeps the pipeline about one URB deep no matter how it is prioritised. The
+        // sweep, which writes a pre-built buffer in a tight loop, is clean at this depth. Worth
+        // knowing before reading a tone underrun as a transport problem.
+        // SAFETY: `setpriority` on the calling thread; no pointers, no shared state.
+        let applied = unsafe {
+            libc::setpriority(libc::PRIO_PROCESS, 0, -16);
+            libc::getpriority(libc::PRIO_PROCESS, 0) <= -16
+        };
+        log!("ANDROID_PRIORITY_AUDIO (-16) applied: {applied}");
+
         let opts = OpenOptions {
             depth: Depth::Millis(depth_ms.clamp(1, 200) as u32),
             ..Default::default()
