@@ -14,8 +14,8 @@ edition = "2021"
 # headroom for `c"…"` literals (1.77).
 rust-version = "1.77"
 license = "MIT OR Apache-2.0"
-authors = ["unom <hi@unom.io>"]
-repository = "https://github.com/unom/usb-iso"
+authors = ["unom"]
+repository = "https://github.com/unom-io/usbfs-iso"
 keywords = ["usb", "isochronous", "usbfs", "android", "audio"]
 categories = ["hardware-support", "os::linux-apis", "multimedia::audio"]
 
