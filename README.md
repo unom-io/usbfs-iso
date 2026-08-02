@@ -102,9 +102,11 @@ length plan.
   any host including macOS: `cargo test --workspace`.
 - **Tier 1 — a real virtual USB device.** `ci/gadget-rig.sh` binds the kernel's `f_uac1` gadget to a
   `dummy_hcd` virtual UDC, and the host side of the same machine enumerates a genuine USB Audio
-  device the crates drive end to end. **Whether a given kernel can do this is unverified** — distro
-  kernels frequently ship `# CONFIG_USB_DUMMY_HCD is not set`. Run `./ci/gadget-rig.sh check`
-  first; it needs no root and changes nothing.
+  device the crates drive end to end. **Hosted CI runners cannot do this**: measured on
+  `ubuntu-latest` (kernel 6.17.0-1020-azure), `CONFIG_USB_GADGET` is not set at all — the whole
+  gadget stack is absent from the cloud image, so no amount of privilege helps. Green tier-1 needs a
+  purpose-built VM or a self-hosted machine. Run `./ci/gadget-rig.sh check` on any candidate first;
+  it needs no root and changes nothing.
 - **Tier 2 — hardware, manual.** `iso-probe spike` and `iso-probe sweep` on a real device.
 
 `./scripts/check.sh` runs everything CI runs — fmt, tests, clippy across all four targets and both
@@ -123,7 +125,7 @@ Implemented and green: the transport, the class layer, the harnesses, and the An
 - The **latency floor** (`iso-probe sweep`). Nobody has published what the achievable in-flight
   depth is on Android. If it lands above ~15 ms the route serves music and video output well and
   haptics poorly — which is a real answer, and the harness prints it as one.
-- The **tier-1 CI rig**, per the note above.
+- The **tier-1 rig**, which needs a kernel with the gadget stack — no hosted runner has one (above).
 - The DualSense descriptor fixture is **synthesised** from measured values, not a byte-exact
   capture. `iso-probe dump` emits a replacement in the right form.
 

@@ -163,7 +163,7 @@ impl UsbFsDevice {
     /// Bus speed, via `USBDEVFS_GET_SPEED`.
     ///
     /// **Read this before sizing anything.** It is the input that decides whether a `bInterval` of
-    /// 4 means 1 ms or 8 ms (see [`crate::schedule`]). It works on a descriptor handed over from
+    /// 4 means 1 ms or 8 ms (see [`crate::Schedule`]). It works on a descriptor handed over from
     /// Android with no sysfs access, which is why the whole crate can key off it.
     pub fn speed(&self) -> Result<Speed> {
         let raw = ioctl(

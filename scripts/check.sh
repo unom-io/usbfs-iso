@@ -42,7 +42,17 @@ for t in "${TARGETS[@]}"; do
   done
 done
 
+# Docs must be built for a LINUX target, not just the host. On a macOS host the `device` and `iso`
+# modules are cfg'd out entirely, so building docs there checks barely half the crate and happily
+# passes on a broken intra-doc link in the transport. Ask for the Linux target explicitly, and fall
+# back to the host only when it is not installed.
 echo "== docs =="
-RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --features uac-host/uac2
+if have_target x86_64-unknown-linux-gnu; then
+  RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --features uac-host/uac2 \
+    --target x86_64-unknown-linux-gnu
+else
+  echo "   (x86_64-unknown-linux-gnu not installed; docs cover only the host's cfg)"
+  RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --features uac-host/uac2
+fi
 
 echo "all green"

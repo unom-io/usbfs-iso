@@ -72,7 +72,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo doc --workspace --no-deps --features uac-host/uac2
+      # Explicitly a Linux target: the transport modules are cfg'd out everywhere else, so a
+      # host-only doc build would check barely half the crate.
+      - run: cargo doc --workspace --no-deps --features uac-host/uac2 --target x86_64-unknown-linux-gnu
         env:
           RUSTDOCFLAGS: -D warnings
 
@@ -87,26 +89,38 @@ jobs:
 
   # Tier 1: a real virtual USB Audio device via dummy_hcd + f_uac1.
   #
-  # Continue-on-error on purpose, and NOT because the tests are flaky. GitHub's runner kernel is a
-  # stock cloud image that has historically not shipped CONFIG_USB_DUMMY_HCD, so this job's real
-  # output is the `check` step telling us whether the rig is possible there at all. Turn off
-  # continue-on-error the day it passes; until then a red X here would just train people to ignore
-  # the board.
+  # MEASURED 2026-08-02 on ubuntu-latest (kernel 6.17.0-1020-azure): `# CONFIG_USB_GADGET is not
+  # set`. Not just dummy_hcd missing — the whole gadget stack is absent from the cloud image, so no
+  # amount of privilege makes the rig work on a hosted runner. Getting tier 1 green needs a
+  # purpose-built VM or a self-hosted machine.
+  #
+  # So the job's job is to *report* that, and it succeeds when it has. A run that finds support and
+  # then fails the rig is a genuine failure and turns the job red — which is the distinction
+  # `continue-on-error` could not express, and why it is not used here.
   gadget:
-    name: tier-1 gadget rig (informational)
+    name: tier-1 gadget rig
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: does this kernel support the rig?
-        run: ./ci/gadget-rig.sh check
+        id: check
+        run: |
+          if ./ci/gadget-rig.sh check; then
+            echo "supported=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "supported=false" >> "$GITHUB_OUTPUT"
+            echo "NOTE: this runner's kernel cannot host the tier-1 rig; tier-0 still covers all
+            parsing and packet arithmetic. See the step log for which options are missing."
+          fi
       - name: bring the gadget up
+        if: steps.check.outputs.supported == 'true'
         run: sudo ./ci/gadget-rig.sh up
       - name: drive it
+        if: steps.check.outputs.supported == 'true'
         run: |
           sudo -E env "PATH=$PATH" USB_ISO_GADGET=1 \
             cargo test -p uac-host --test gadget -- --ignored --test-threads=1
       - name: tear it down
-        if: always()
+        if: always() && steps.check.outputs.supported == 'true'
         run: sudo ./ci/gadget-rig.sh down || true
