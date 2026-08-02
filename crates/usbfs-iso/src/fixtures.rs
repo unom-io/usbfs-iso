@@ -7,17 +7,28 @@
 //!
 //! # Provenance — read this before trusting a byte
 //!
-//! [`DUALSENSE_DESCRIPTORS`] is **synthesised, not captured.** Its externally-observable values
-//! are the ones measured on glass and recorded in the design docs — interface 1 alt 1 carrying an
-//! isochronous OUT endpoint with `wMaxPacketSize` 392 and `bInterval` 4, four channels at 48 kHz
-//! 16-bit, the audio function occupying interfaces 0..2 with HID on interface 3, and
-//! VID:PID `054c:0ce6`. The surrounding topology (terminal IDs, the feature unit, string indices)
-//! is a plausible reconstruction, because no byte-exact dump was available when this was written.
+//! [`DUALSENSE_DESCRIPTORS`] is **synthesised, but every externally-observable value in it has now
+//! been confirmed against a real pad** — a DualSense on a Nothing Phone (3) (A024, Android 16),
+//! read back through `dumpsys usb` on 2026-08-02:
 //!
-//! **To replace it with a real capture**, run `iso-probe dump --vid 054c --pid 0ce6 --out ds5.bin`
-//! against a wired pad and paste the bytes here. Everything the tests assert is an observed value,
-//! so a real dump should slot in without changing a single assertion — and if it does change one,
-//! that is a finding worth chasing rather than a fixture to paper over.
+//! | | fixture | measured |
+//! |---|---|---|
+//! | if0 alt0 | class 1 / subclass 1, no endpoints | same |
+//! | if1 alt0 | class 1 / subclass 2, no endpoints | same |
+//! | if1 alt1 endpoint 0x01 | isochronous OUT, 392 B, `bInterval` 4 | same |
+//! | if2 alt1 endpoint 0x82 | isochronous IN, **196 B**, `bInterval` 4 | same (was 100 — corrected) |
+//! | if3 endpoints 0x84 / 0x03 | interrupt, 64 B, `bInterval` 6 | same |
+//! | VID:PID | `054c:0ce6` | same |
+//!
+//! What remains reconstructed is the part `dumpsys` does not expose: the class-specific descriptors
+//! — terminal IDs, the feature unit, channel config, the format-type rate table — and the string
+//! indices. Those are spec-shaped and self-consistent rather than captured.
+//!
+//! **To replace it with a byte-exact capture**, run
+//! `iso-probe dump --device 054c:0ce6 --out ds5.bin` against a wired pad on desktop Linux and paste
+//! the bytes here. Everything the tests assert is an observed value, so a real dump should slot in
+//! without changing a single assertion — and if it does change one, that is a finding worth chasing
+//! rather than a fixture to paper over.
 //!
 //! [`UAC2_DAC_DESCRIPTORS`] is likewise a synthesised but spec-faithful two-channel 24-bit UAC2
 //! DAC with an asynchronous endpoint and a feedback endpoint — the shape the DualSense does *not*
@@ -108,8 +119,8 @@ pub static DUALSENSE_DESCRIPTORS: &[u8] = &[
     0x07, 0x24, 0x01, 0x02, 0x01, 0x01, 0x00,
     //      CS_INTERFACE / FORMAT_TYPE_I - 1 channel 16-bit 48 kHz (11)
     0x0b, 0x24, 0x02, 0x01, 0x01, 0x02, 0x10, 0x01, 0x80, 0xbb, 0x00,
-    //      Endpoint 0x82: isochronous, asynchronous (9)
-    0x09, 0x05, 0x82, 0x05, 0x64, 0x00, 0x04, 0x00, 0x00,
+    //      Endpoint 0x82: isochronous, asynchronous, 196 bytes (9)
+    0x09, 0x05, 0x82, 0x05, 0xc4, 0x00, 0x04, 0x00, 0x00,
     //      CS_ENDPOINT / EP_GENERAL (7)
     0x07, 0x25, 0x01, 0x01, 0x00, 0x00, 0x00,
     // ---- Interface 3: HID - the gamepad, which must keep working (9) ----
