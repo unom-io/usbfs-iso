@@ -193,6 +193,17 @@ impl AudioStream {
         self.sampling_freq_control
     }
 
+    /// `bUnitID` of the function's Feature Unit — the entity that owns Mute and Volume — when the
+    /// descriptors declare one.
+    ///
+    /// Worth having in the public API rather than only inside the streaming path: a device's
+    /// mute state is **not** the host's until the host sets it, and a muted device streams
+    /// perfectly. Every transfer completes, no short writes, no URB errors, and nothing comes out
+    /// — so a caller that renders its own audio needs to be able to see that this control exists.
+    pub fn feature_unit(&self) -> Option<u8> {
+        self.feature_unit
+    }
+
     /// The single rate this stream can do, if it advertises exactly one.
     ///
     /// Only the stream-opening path consults this, and that is Linux-only.
@@ -705,6 +716,16 @@ mod tests {
             !s.rates().contains(48_000),
             "an unresolved clock must not claim support"
         );
+    }
+
+    /// The Feature Unit is what `clear_mute` addresses, and losing it silently would put us back
+    /// to streaming into a device nothing ever unmutes — which fails without a single error.
+    #[test]
+    fn the_feature_unit_id_is_read_from_the_control_interface() {
+        let f = parse(fixtures::DUALSENSE_DESCRIPTORS).unwrap();
+        let out = f.output_streams().next().unwrap();
+        // The fixture's CS_INTERFACE / FEATURE_UNIT declares bUnitID 5.
+        assert_eq!(out.feature_unit(), Some(5));
     }
 
     #[test]
