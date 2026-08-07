@@ -38,6 +38,9 @@ const AC_INPUT_TERMINAL: u8 = 0x02;
 const AC_OUTPUT_TERMINAL: u8 = 0x03;
 #[cfg(feature = "uac2")]
 const AC_CLOCK_SOURCE: u8 = 0x0a;
+/// AudioControl descriptor subtype: Feature Unit — where Mute and Volume live (UAC1 §4.3.2.5,
+/// UAC2 §4.7.2.8). Only `bUnitID` is read, and it sits at the same offset in both revisions.
+const AC_FEATURE_UNIT: u8 = 0x06;
 
 // Class-specific AS interface descriptor subtypes.
 const AS_GENERAL: u8 = 0x01;
@@ -107,6 +110,8 @@ pub struct AudioStream {
     pub(crate) control_interface: u8,
     pub(crate) version: UacVersion,
     pub(crate) sampling_freq_control: bool,
+    /// `bUnitID` of the function's Feature Unit — the address for Mute/Volume.
+    pub(crate) feature_unit: Option<u8>,
 }
 
 impl AudioStream {
@@ -188,6 +193,17 @@ impl AudioStream {
         self.sampling_freq_control
     }
 
+    /// `bUnitID` of the function's Feature Unit — the entity that owns Mute and Volume — when the
+    /// descriptors declare one.
+    ///
+    /// Worth having in the public API rather than only inside the streaming path: a device's
+    /// mute state is **not** the host's until the host sets it, and a muted device streams
+    /// perfectly. Every transfer completes, no short writes, no URB errors, and nothing comes out
+    /// — so a caller that renders its own audio needs to be able to see that this control exists.
+    pub fn feature_unit(&self) -> Option<u8> {
+        self.feature_unit
+    }
+
     /// The single rate this stream can do, if it advertises exactly one.
     ///
     /// Only the stream-opening path consults this, and that is Linux-only.
@@ -267,6 +283,7 @@ pub fn parse_all(blob: &[u8]) -> Result<Vec<AudioFunction>> {
                             version,
                             control_interface: iface.number,
                             terminal_clocks: Vec::new(),
+                            feature_unit: None,
                             streams: Vec::new(),
                         });
                     }
@@ -367,6 +384,8 @@ struct PendingFunction {
     control_interface: u8,
     /// UAC2 only: `bTerminalID` to `bCSourceID`.
     terminal_clocks: Vec<(u8, u8)>,
+    /// `bUnitID` of the function's Feature Unit, when it has one.
+    feature_unit: Option<u8>,
     streams: Vec<AudioStream>,
 }
 
@@ -374,6 +393,14 @@ impl PendingFunction {
     fn control_descriptor(&mut self, bytes: &[u8]) {
         if bytes.len() < 3 {
             return;
+        }
+        // The Feature Unit is revision-independent for our purposes: the layouts diverge after
+        // `bSourceID`, but `bUnitID` is byte 3 in both, and that is the whole address a Mute or
+        // Volume request needs. Which controls the unit actually implements is NOT read from
+        // `bmaControls` — the bit layout differs per revision and a device is entitled to stall a
+        // request it does not support, which the caller already tolerates.
+        if bytes[2] == AC_FEATURE_UNIT && bytes.len() >= 5 {
+            self.feature_unit.get_or_insert(bytes[3]);
         }
         match self.version {
             UacVersion::Uac1 => { /* Terminals and units carry nothing a stream needs. */ }
@@ -588,6 +615,7 @@ impl PendingStream {
             control_interface: self.control_interface,
             version: self.version,
             sampling_freq_control: self.sampling_freq_control,
+            feature_unit: function.feature_unit,
         })
     }
 }
@@ -690,6 +718,16 @@ mod tests {
         );
     }
 
+    /// The Feature Unit is what `clear_mute` addresses, and losing it silently would put us back
+    /// to streaming into a device nothing ever unmutes — which fails without a single error.
+    #[test]
+    fn the_feature_unit_id_is_read_from_the_control_interface() {
+        let f = parse(fixtures::DUALSENSE_DESCRIPTORS).unwrap();
+        let out = f.output_streams().next().unwrap();
+        // The fixture's CS_INTERFACE / FEATURE_UNIT declares bUnitID 5.
+        assert_eq!(out.feature_unit(), Some(5));
+    }
+
     #[test]
     fn the_optional_sampling_frequency_control_bit_is_read_from_the_class_endpoint() {
         let f = parse(fixtures::DUALSENSE_DESCRIPTORS).unwrap();
@@ -711,6 +749,7 @@ mod tests {
             version: UacVersion::Uac2,
             control_interface: 0,
             terminal_clocks: Vec::new(),
+            feature_unit: None,
             streams: Vec::new(),
         };
         let input = [

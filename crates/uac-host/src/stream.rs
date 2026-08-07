@@ -29,6 +29,12 @@ const REQ_SET_CUR: u8 = 0x01;
 const REQ_RANGE: u8 = 0x02;
 /// `SAMPLING_FREQ_CONTROL` (UAC1, on an endpoint) and `CS_SAM_FREQ_CONTROL` (UAC2, on a clock).
 const CTRL_SAMPLING_FREQ: u16 = 0x01;
+/// Feature Unit control selectors (UAC1 §A.10.2, UAC2 §A.17.7). Both revisions agree on these.
+const CTRL_MUTE: u16 = 0x01;
+const CTRL_VOLUME: u16 = 0x02;
+/// 0 dB in the 1/256-dB signed fixed point both revisions use for volume — unity gain, the level
+/// a device is required to accept if it implements the control at all.
+const VOLUME_0DB: i16 = 0;
 
 /// Host-to-device, class request, endpoint recipient.
 const RT_OUT_CLASS_ENDPOINT: u8 = 0x22;
@@ -57,6 +63,13 @@ pub struct OpenOptions {
     /// Whether to issue the sample-rate control request. Off for devices with a single fixed rate
     /// that stall on the request.
     pub set_sample_rate: bool,
+    /// Whether to clear the Feature Unit's Mute and set its Volume to unity before streaming.
+    ///
+    /// On by default, and you almost certainly want it: a device's mute/volume state is **not**
+    /// ours until we set it, and nothing else in this crate touches it. Streaming into a muted
+    /// device succeeds at every layer — URBs complete, no short writes, no errors — and produces
+    /// silence, which is indistinguishable from a working stream in every counter we report.
+    pub unmute: bool,
     /// How long a write waits for a free slot before reporting back-pressure.
     pub write_timeout: Duration,
 }
@@ -72,6 +85,7 @@ impl Default for OpenOptions {
             claim: Claim::Force,
             underrun: Underrun::FillSilence,
             set_sample_rate: true,
+            unmute: true,
             write_timeout: Duration::from_millis(100),
         }
     }
@@ -183,6 +197,9 @@ impl AudioStream {
         if opts.set_sample_rate {
             self.write_sample_rate(device, rate)?;
         }
+        if opts.unmute {
+            self.clear_mute(device);
+        }
 
         let iso = IsoOut::builder(device, self.endpoint.address)
             .speed(speed)
@@ -213,6 +230,47 @@ impl AudioStream {
         };
         playback.iso.start()?;
         Ok(playback)
+    }
+
+    /// Clear the Feature Unit's Mute and set Volume to unity, so the device actually renders what
+    /// we are about to send it.
+    ///
+    /// **This is not a nicety.** A DualSense that has not been unmuted by some previous host plays
+    /// nothing at all — neither its speaker nor its voice coils — while every signal this crate
+    /// reports stays perfectly healthy: URBs complete, `short_bytes` is 0, `urb_errors` is 0. The
+    /// counters cannot see mute, so the failure looks exactly like success. It cost a full
+    /// debugging session, and an earlier "audio comes out of the pad" result turned out to be
+    /// nothing but a pad another host had left unmuted.
+    ///
+    /// Best-effort by design: a device that does not implement these controls stalls, which UAC
+    /// permits, and a stall leaves its existing level alone. Amplitude is governed by the PCM the
+    /// caller writes, so unity gain is the right target rather than the device maximum.
+    fn clear_mute(&self, device: &UsbFsDevice) {
+        let Some(unit) = self.feature_unit else {
+            return;
+        };
+        // wIndex addresses the entity behind the AudioControl interface; wValue is the control
+        // selector in the high byte and the channel number in the low. Channel 0 is master, which
+        // is what a Feature Unit is required to expose when it implements a control at all.
+        let index = (u16::from(unit) << 8) | u16::from(self.control_interface);
+        let mut mute = [0u8; 1];
+        let _ = device.control(
+            RT_OUT_CLASS_INTERFACE,
+            REQ_SET_CUR,
+            CTRL_MUTE << 8,
+            index,
+            &mut mute,
+            CONTROL_TIMEOUT,
+        );
+        let mut volume = VOLUME_0DB.to_le_bytes();
+        let _ = device.control(
+            RT_OUT_CLASS_INTERFACE,
+            REQ_SET_CUR,
+            CTRL_VOLUME << 8,
+            index,
+            &mut volume,
+            CONTROL_TIMEOUT,
+        );
     }
 
     /// Set the sample rate, tolerating the two legal ways a device can decline.
