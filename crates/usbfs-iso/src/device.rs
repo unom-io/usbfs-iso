@@ -165,14 +165,39 @@ impl UsbFsDevice {
     /// **Read this before sizing anything.** It is the input that decides whether a `bInterval` of
     /// 4 means 1 ms or 8 ms (see [`crate::Schedule`]). It works on a descriptor handed over from
     /// Android with no sysfs access, which is why the whole crate can key off it.
+    ///
+    /// Kernels before 4.13 (Android TV boxes on 4.9) lack the ioctl, so the speed is read off the
+    /// device instead: see [`Speed::from_device_probe`].
     pub fn speed(&self) -> Result<Speed> {
-        let raw = ioctl(
+        match ioctl(
             self.fd,
             sys::GET_SPEED,
             std::ptr::null_mut(),
             ErrnoContext::Other,
-        )?;
-        Ok(Speed::from_raw(raw))
+        ) {
+            Ok(raw) => Ok(Speed::from_raw(raw)),
+            Err(Error::Unsupported(_)) => self.probe_speed(),
+            Err(e) => Err(e),
+        }
+    }
+
+    fn probe_speed(&self) -> Result<Speed> {
+        let max_packet0 = self.raw_descriptors()?[7];
+        let mut qualifier = [0u8; 10];
+        // GET_DESCRIPTOR(DEVICE_QUALIFIER), device-to-host standard request.
+        let has_qualifier = match self.control(
+            0x80,
+            0x06,
+            0x0600,
+            0,
+            &mut qualifier,
+            std::time::Duration::from_millis(500),
+        ) {
+            Ok(n) => n >= 2 && qualifier[1] == 0x06,
+            Err(e) if e.is_stall() => false,
+            Err(e) => return Err(e),
+        };
+        Ok(Speed::from_device_probe(max_packet0, has_qualifier))
     }
 
     /// usbfs capabilities of the running kernel.

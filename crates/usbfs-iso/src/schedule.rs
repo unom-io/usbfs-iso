@@ -50,6 +50,23 @@ impl Speed {
         }
     }
 
+    /// The speed a kernel without `USBDEVFS_GET_SPEED` (before 4.13) cannot report, read off the
+    /// device instead.
+    ///
+    /// `max_packet0` is the device descriptor's `bMaxPacketSize0`, an exponent (9 = 512 bytes)
+    /// only at SuperSpeed. `has_qualifier` is whether the device answered
+    /// `GET_DESCRIPTOR(DEVICE_QUALIFIER)`: USB 2.0 §9.6.2 requires a full-speed-only device to
+    /// STALL it, and a high-speed-capable one to return it.
+    pub fn from_device_probe(max_packet0: u8, has_qualifier: bool) -> Speed {
+        match (max_packet0, has_qualifier) {
+            (9, _) => Speed::Super,
+            // ponytail: a high-speed device behind a USB 1.1 hub runs at full speed and lands
+            // here as High. Android hosts have high-speed ports; time a URB if that ever bites.
+            (_, true) => Speed::High,
+            (_, false) => Speed::Full,
+        }
+    }
+
     /// Length of one service interval in microseconds — 1000 µs (frame) or 125 µs (microframe).
     ///
     /// `None` for speeds that cannot carry isochronous traffic.
@@ -247,6 +264,14 @@ mod tests {
                 "{speed:?} bInterval {b_interval}"
             );
         }
+    }
+
+    #[test]
+    fn a_device_probe_tells_full_from_high_speed() {
+        // A real DualSense returns a qualifier; a Pico-based DualSense dongle is full-speed only.
+        assert_eq!(Speed::from_device_probe(64, true), Speed::High);
+        assert_eq!(Speed::from_device_probe(64, false), Speed::Full);
+        assert_eq!(Speed::from_device_probe(9, false), Speed::Super);
     }
 
     #[test]
